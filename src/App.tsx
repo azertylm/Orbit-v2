@@ -962,11 +962,37 @@ export default function App() {
     };
   }, []);
 
-  // Idée 1 : Mode Cinéma Plein Écran (Assombrissement)
+  // Idée 1 : Mode Cinéma Plein Écran (Assombrissement & Vue Entière Adaptée)
   const [cinemaMode, setCinemaMode] = useState(false);
   const [cinemaModalVideo, setCinemaModalVideo] = useState<OrbitVideo | null>(
     null
   );
+  const [autoFullViewPref, setAutoFullViewPref] = useState<boolean>(() =>
+    OrbitStorageService.getAutoFullViewOnPlay()
+  );
+
+  useEffect(() => {
+    const handlePref = (e: Event) => {
+      const customEv = e as CustomEvent<{ enabled: boolean }>;
+      if (customEv.detail && typeof customEv.detail.enabled === "boolean") {
+        setAutoFullViewPref(customEv.detail.enabled);
+      }
+    };
+    window.addEventListener("orbit:auto-fullview-pref-changed", handlePref);
+    return () => {
+      window.removeEventListener("orbit:auto-fullview-pref-changed", handlePref);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && cinemaModalVideo) {
+        setCinemaModalVideo(null);
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [cinemaModalVideo]);
 
   // Idée 12 : Mode 'Focus Absolu' (Zéro Distraction) — Index de lecture
   const [focusVideoIndex, setFocusVideoIndex] = useState<number>(0);
@@ -9301,56 +9327,89 @@ export default function App() {
       />
 
       {/* ==========================================================
-          IDÉE 1 : MODE CINÉMA PLEIN ÉCRAN (THEATRE BLACKOUT OVERLAY)
+          IDÉE 1 : MODE CINÉMA PLEIN ÉCRAN & VUE ENTIÈRE ADAPTÉE
           ========================================================== */}
-      {cinemaModalVideo && (
-        <div
-          className="fixed inset-0 z-50 bg-black/96 backdrop-blur-2xl flex flex-col items-center justify-center p-4 sm:p-8"
-          onClick={() => setCinemaModalVideo(null)}
-        >
+      {cinemaModalVideo && (() => {
+        const isVertical = cinemaModalVideo.ratio === "9-16";
+        return (
           <div
-            className="w-full max-w-5xl space-y-4"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 bg-black/95 backdrop-blur-2xl flex flex-col items-center justify-center p-3 sm:p-6 overflow-y-auto"
+            onClick={() => setCinemaModalVideo(null)}
           >
-            <div className="flex items-center justify-between text-white/80 text-xs">
-              <div className="flex items-center gap-2 font-bold">
-                <Film className="w-4 h-4 text-amber-400" />
-                <span>Mode Cinéma Haute Immersion</span>
-                <span>·</span>
-                <span className="text-white">{cinemaModalVideo.title}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCinemaModalVideo(null)}
-                className="px-3 py-1.5 rounded-xl glass-action-btn text-white font-bold cursor-pointer inline-flex items-center gap-1.5"
-              >
-                <X className="w-4 h-4" />
-                <span>Rallumer les lumières</span>
-              </button>
-            </div>
             <div
-              className="w-full aspect-video rounded-3xl overflow-hidden bg-black"
-              style={{
-                boxShadow:
-                  "0 0 120px rgba(124, 92, 255, 0.3), 0 35px 90px rgba(0, 0, 0, 0.95)",
-                border: "1px solid rgba(255,255,255,0.16)",
-              }}
+              className={`w-full ${isVertical ? "max-w-md" : "max-w-5xl"} space-y-3 my-auto`}
+              onClick={(e) => e.stopPropagation()}
             >
-              <UniversalVideoPlayer
-                video={cinemaModalVideo}
-                playing={true}
-                controls={true}
-                showTopBar={true}
-                onLaunchReels={(sec) =>
-                  handleLaunchReelsFromVideo(cinemaModalVideo, sec || 0)
-                }
-                onRemoveUnavailableVideo={handleRemoveUnavailableVideo}
-                className="w-full h-full"
-              />
+              <div className="flex items-center justify-between text-white/90 text-xs flex-wrap gap-2 px-1">
+                <div className="flex items-center gap-2 font-bold min-w-0">
+                  <span className="px-2.5 py-1 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 text-[10px] uppercase font-extrabold flex items-center gap-1.5 shrink-0 shadow-sm">
+                    <Film className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Vue Entière {isVertical ? "9:16 Vertical" : "16:9 Panoramique"}</span>
+                  </span>
+                  <span className="text-white/80 truncate max-w-[200px] sm:max-w-md font-medium">
+                    {cinemaModalVideo.title}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <label className="flex items-center gap-1.5 text-[11px] text-white/80 hover:text-white cursor-pointer select-none bg-white/10 hover:bg-white/15 px-2.5 py-1 rounded-lg border border-white/15 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={autoFullViewPref}
+                      onChange={(e) => {
+                        const nextVal = e.target.checked;
+                        setAutoFullViewPref(nextVal);
+                        OrbitStorageService.saveAutoFullViewOnPlay(nextVal);
+                        showToast(
+                          nextVal
+                            ? "✅ Mode Vue Entière automatique activé : vos vidéos s'adaptent désormais en plein format au clic"
+                            : "ℹ️ Mode Vue Entière automatique désactivé : lecture intégrée par défaut"
+                        );
+                      }}
+                      className="rounded accent-amber-400 w-3.5 h-3.5 cursor-pointer"
+                    />
+                    <span className="hidden sm:inline">Toujours ouvrir en vue entière</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setCinemaModalVideo(null)}
+                    className="px-3 py-1.5 rounded-xl glass-action-btn text-white font-bold cursor-pointer inline-flex items-center gap-1.5 hover:bg-white/20 transition-colors"
+                    title="Fermer la vue entière (Échap)"
+                  >
+                    <X className="w-4 h-4" />
+                    <span>Fermer</span>
+                  </button>
+                </div>
+              </div>
+
+              <div
+                className={`w-full ${
+                  isVertical
+                    ? "h-[80vh] max-h-[820px] aspect-[9/16] rounded-3xl overflow-hidden bg-black mx-auto shadow-2xl"
+                    : "aspect-video rounded-3xl overflow-hidden bg-black shadow-2xl"
+                }`}
+                style={{
+                  boxShadow:
+                    "0 0 120px rgba(124, 92, 255, 0.3), 0 35px 90px rgba(0, 0, 0, 0.95)",
+                  border: "1px solid rgba(255,255,255,0.16)",
+                }}
+              >
+                <UniversalVideoPlayer
+                  video={cinemaModalVideo}
+                  playing={true}
+                  controls={true}
+                  videoFitMode="contain"
+                  showTopBar={true}
+                  onLaunchReels={(sec) =>
+                    handleLaunchReelsFromVideo(cinemaModalVideo, sec || 0)
+                  }
+                  onRemoveUnavailableVideo={handleRemoveUnavailableVideo}
+                  className="w-full h-full"
+                />
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ==========================================================
           IDÉE 8 : MODE AUDIO / PODCAST EN ARRIÈRE-PLAN (PERSISTENT DOCK)

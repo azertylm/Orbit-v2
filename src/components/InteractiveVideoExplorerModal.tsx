@@ -348,7 +348,7 @@ export const InteractiveVideoExplorerModal: React.FC<
         target?.isContentEditable
       ) {
         if (e.key === "Escape") {
-          target.blur();
+          target?.blur();
         }
         return;
       }

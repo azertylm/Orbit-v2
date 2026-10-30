@@ -272,6 +272,23 @@ export const VideoCard: React.FC<VideoCardProps> = ({
     return () => clearInterval(timer);
   }, [inlinePlaying]);
 
+  const [autoFullView, setAutoFullView] = useState<boolean>(() =>
+    OrbitStorageService.getAutoFullViewOnPlay()
+  );
+
+  useEffect(() => {
+    const handlePref = (e: Event) => {
+      const customEv = e as CustomEvent<{ enabled: boolean }>;
+      if (customEv.detail && typeof customEv.detail.enabled === "boolean") {
+        setAutoFullView(customEv.detail.enabled);
+      }
+    };
+    window.addEventListener("orbit:auto-fullview-pref-changed", handlePref);
+    return () => {
+      window.removeEventListener("orbit:auto-fullview-pref-changed", handlePref);
+    };
+  }, []);
+
   const handleStartInlinePlay = (seekSec = 0) => {
     window.dispatchEvent(
       new CustomEvent("orbit:inline-video-play", {
@@ -282,6 +299,16 @@ export const VideoCard: React.FC<VideoCardProps> = ({
     setElapsedSeconds(seekSec > 0 ? seekSec : 12);
     setInlinePlaying(true);
     if (onMarkWatched) onMarkWatched(video.id);
+  };
+
+  const handleStartWatch = (e?: React.MouseEvent, forceInline = false) => {
+    if (e) e.stopPropagation();
+    if (onMarkWatched) onMarkWatched(video.id);
+    if (!forceInline && autoFullView && onOpenCinema) {
+      onOpenCinema(video);
+      return;
+    }
+    handleStartInlinePlay(0);
   };
 
   // Fonctionnalité 18 : Déclencher une salve de particules flottantes sur le bord droit + enregistrer le timestamp
@@ -388,7 +415,11 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   }, [video.commentsList]);
 
   const ratioClass =
-    video.ratio === "9-16" ? "aspect-[9/12] max-h-[270px]" : "aspect-video";
+    video.ratio === "9-16"
+      ? inlinePlaying
+        ? "aspect-[9/16] max-h-[540px]"
+        : "aspect-[9/12] max-h-[270px]"
+      : "aspect-video";
 
   return (
     <article
@@ -524,10 +555,19 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               playing={true}
               muted={false}
               controls={true}
+              videoFitMode="contain"
               startAtSeconds={startAtSeconds}
               showTopBar={true}
               autoRemoveOnFatalError={true}
               onCloseInline={() => setInlinePlaying(false)}
+              onExpandToFullView={
+                onOpenCinema
+                  ? () => {
+                      setInlinePlaying(false);
+                      onOpenCinema(video);
+                    }
+                  : undefined
+              }
               onLaunchReels={
                 onLaunchReels
                   ? (sec) => {
@@ -543,7 +583,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           ) : (
             <div
               className="w-full h-full cursor-pointer"
-              onClick={() => handleStartInlinePlay(0)}
+              onClick={(e) => handleStartWatch(e, false)}
             >
               {!imgError ? (
                 <img
@@ -595,10 +635,24 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                 </div>
               )}
 
-              <div className="absolute inset-0 orbit-video-scrim flex items-center justify-center">
-                <div className="w-13 h-13 rounded-full glass-action-btn flex items-center justify-center text-white">
-                  <Play className="w-5 h-5 fill-current ml-0.5" />
-                </div>
+              <div className="absolute inset-0 orbit-video-scrim flex flex-col items-center justify-center gap-2 group-hover:bg-black/60 transition-colors">
+                <button
+                  type="button"
+                  onClick={(e) => handleStartWatch(e, false)}
+                  className="px-4 py-2.5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold text-xs shadow-2xl flex items-center gap-2 transform hover:scale-105 active:scale-95 transition-all cursor-pointer border border-amber-300/50"
+                  title="Lancer et adapter en Vue Entière (Plein écran adapté sans coupure)"
+                >
+                  <Play className="w-4 h-4 fill-current ml-0.5" />
+                  <span>Vue Entière {video.ratio === "9-16" ? "9:16" : "16:9"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => handleStartWatch(e, true)}
+                  className="px-3 py-1 rounded-full bg-black/70 hover:bg-black/90 text-white/80 hover:text-white font-medium text-[10px] backdrop-blur-md border border-white/20 flex items-center gap-1 cursor-pointer transition-colors"
+                  title="Lire directement dans la carte"
+                >
+                  <span>Lecture en carte</span>
+                </button>
               </div>
             </div>
           );

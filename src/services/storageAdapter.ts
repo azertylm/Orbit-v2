@@ -1092,6 +1092,39 @@ export const OrbitStorageService = {
     }
   },
 
+  getAutoFullViewOnPlay(): boolean {
+    try {
+      const raw = localStorage.getItem(PLAYBACK_PREFS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed.autoFullViewOnPlay === "boolean") {
+          return parsed.autoFullViewOnPlay;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return false; // Lecture intégrée avec cadrage entier par défaut (sans forcer l'ouverture en pop-up)
+  },
+
+  saveAutoFullViewOnPlay(enabled: boolean): void {
+    try {
+      const raw = localStorage.getItem(PLAYBACK_PREFS_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      parsed.autoFullViewOnPlay = enabled;
+      localStorage.setItem(PLAYBACK_PREFS_KEY, JSON.stringify(parsed));
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("orbit:auto-fullview-pref-changed", {
+            detail: { autoFullViewOnPlay: enabled },
+          })
+        );
+      }
+    } catch {
+      // Ignore
+    }
+  },
+
   // =========================================================================
   // GESTION DES PLAYLISTS PERSONNALISÉES
   // =========================================================================

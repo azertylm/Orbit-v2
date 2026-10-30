@@ -94,6 +94,7 @@ export interface UniversalVideoPlayerProps {
   videoFitMode?: "contain" | "cover" | "zoom";
   onCloseInline?: () => void;
   onLaunchReels?: (currentSec?: number) => void;
+  onExpandToFullView?: (currentSec?: number) => void;
   onReady?: () => void;
   onError?: (diagnostic: PlatformErrorDiagnostic) => void;
   onRemoveUnavailableVideo?: (videoId: number, reason?: string) => void;
@@ -494,6 +495,7 @@ export const UniversalVideoPlayer: React.FC<UniversalVideoPlayerProps> = ({
   videoFitMode,
   onCloseInline,
   onLaunchReels,
+  onExpandToFullView,
   onReady,
   onError,
   onRemoveUnavailableVideo,
@@ -656,15 +658,14 @@ export const UniversalVideoPlayer: React.FC<UniversalVideoPlayerProps> = ({
   const [subtitleMenuOpen, setSubtitleMenuOpen] = useState<boolean>(false);
   const [internalFitMode, setInternalFitMode] = useState<
     "contain" | "cover" | "zoom"
-  >(videoFitMode || "cover");
+  >(videoFitMode || "contain");
   const [isPlayerFullscreen, setIsPlayerFullscreen] = useState<boolean>(false);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
+  const [fitFeedbackPill, setFitFeedbackPill] = useState<string | null>(null);
 
   useEffect(() => {
-    if (videoFitMode) {
-      setInternalFitMode(videoFitMode);
-    }
-  }, [videoFitMode]);
+    setInternalFitMode(videoFitMode || "contain");
+  }, [videoFitMode, video.id, rawUrl]);
 
   useEffect(() => {
     const onFsChange = () => {
@@ -674,7 +675,7 @@ export const UniversalVideoPlayer: React.FC<UniversalVideoPlayerProps> = ({
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
-  const effectiveFitMode = videoFitMode || internalFitMode;
+  const effectiveFitMode = internalFitMode;
 
   const initialStartRef = useRef<number>(startAtSeconds || 0);
   const hasLiveTimeRef = useRef<boolean>(false);
@@ -776,6 +777,23 @@ export const UniversalVideoPlayer: React.FC<UniversalVideoPlayerProps> = ({
     }, 2200);
   }, []);
 
+  const handleCycleFitMode = useCallback(() => {
+    wakeUpControls();
+    setInternalFitMode((prev) => {
+      const next =
+        prev === "contain" ? "cover" : prev === "cover" ? "zoom" : "contain";
+      setFitFeedbackPill(
+        next === "contain"
+          ? "✨ Adapté en vue entier (100% visible)"
+          : next === "cover"
+          ? "📐 Plein cadre (Remplir l'écran)"
+          : "🔍 Zoom+"
+      );
+      window.setTimeout(() => setFitFeedbackPill(null), 2400);
+      return next;
+    });
+  }, [wakeUpControls]);
+
   const handleTogglePlayerFullscreen = useCallback(async () => {
     wakeUpControls();
     try {
@@ -792,10 +810,10 @@ export const UniversalVideoPlayer: React.FC<UniversalVideoPlayerProps> = ({
         | null;
       if (vidEl?.webkitEnterFullscreen) {
         vidEl.webkitEnterFullscreen();
+        return;
       }
     } catch {
-      // Fallback: cycle fit mode to cover/zoom
-      setInternalFitMode((prev) => (prev === "cover" ? "zoom" : "cover"));
+      // Ignore sandbox/iframe restrictions silently without swapping fit mode
     }
   }, [wakeUpControls]);
 
@@ -1904,6 +1922,16 @@ export const UniversalVideoPlayer: React.FC<UniversalVideoPlayerProps> = ({
           ZONE VIDÉO PRINCIPALE PLEIN CADRE (SANS SUPERPOSITION PERMANENTE)
           ===================================================================== */}
       <div className="relative flex-1 min-h-0 w-full h-full bg-black">
+        {/* Pillule de confirmation visuelle d'adaptation en vue entier */}
+        {fitFeedbackPill && (
+          <div
+            className="pointer-events-none absolute top-4 left-1/2 -translate-x-1/2 z-40 px-3 py-1.5 rounded-full bg-black/85 backdrop-blur-md border border-cyan-400/50 text-cyan-300 text-xs font-bold shadow-xl flex items-center gap-1.5 animate-in fade-in duration-200"
+          >
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping shrink-0" />
+            <span>{fitFeedbackPill}</span>
+          </div>
+        )}
+
         {/* Toast de reprise automatique de lecture */}
         {resumeNotice && (
           <div
@@ -1948,6 +1976,18 @@ export const UniversalVideoPlayer: React.FC<UniversalVideoPlayerProps> = ({
                     embedConfig.platformLabel}
               </span>
             </span>
+
+            {onExpandToFullView && (
+              <button
+                type="button"
+                onClick={() => onExpandToFullView(currentTime)}
+                className="px-2 py-0.5 rounded-md bg-amber-400/20 hover:bg-amber-400/35 border border-amber-400/50 text-[9px] font-extrabold text-amber-300 inline-flex items-center gap-1 cursor-pointer backdrop-blur-md shadow-md"
+                title="Agrandir en Vue Entière (Cinéma adapté)"
+              >
+                <Maximize2 className="w-2.5 h-2.5" />
+                <span>Vue Entière</span>
+              </button>
+            )}
 
             {onCloseInline && (
               <button
@@ -2300,7 +2340,9 @@ export const UniversalVideoPlayer: React.FC<UniversalVideoPlayerProps> = ({
                   currentTimeSec: isScrubbing ? scrubValue : currentTime,
                   lang: subtitleLang,
                   insightHeadline: activeSyncedInsight?.headline,
-                  insightSummary: activeSyncedInsight?.summary,
+                  insightSummary:
+                    activeSyncedInsight?.answer ||
+                    activeSyncedInsight?.aiAnalysis,
                 })}
               </p>
             </div>
@@ -2646,30 +2688,38 @@ export const UniversalVideoPlayer: React.FC<UniversalVideoPlayerProps> = ({
                 <span>{playbackRate}x</span>
               </button>
 
-              {/* Sélecteur de cadrage (Plein cadre / Zoom / Entier) */}
+              {/* Sélecteur de cadrage (Entier par défaut / Remplir / Zoom+) */}
               <button
                 type="button"
-                onClick={() => {
-                  wakeUpControls();
-                  setInternalFitMode((prev) =>
-                    prev === "cover"
-                      ? "zoom"
-                      : prev === "zoom"
-                      ? "contain"
-                      : "cover"
-                  );
-                }}
-                className="px-1.5 h-6 rounded-md bg-white/[0.08] hover:bg-white/20 border border-white/15 text-[10px] font-bold text-white/85 hover:text-white inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
-                title="Adapter le format d'affichage (Plein cadre / Zoom / Format entier)"
+                onClick={handleCycleFitMode}
+                className={`px-1.5 h-6 rounded-md border text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors ${
+                  effectiveFitMode === "contain"
+                    ? "bg-cyan-500/25 text-cyan-300 border-cyan-400/50"
+                    : "bg-white/[0.08] hover:bg-white/20 border-white/15 text-white/85 hover:text-white"
+                }`}
+                title="Adapter le format d'affichage (Vue Entier / Remplir / Zoom+)"
               >
                 <span>
                   {effectiveFitMode === "zoom"
                     ? "Zoom+"
                     : effectiveFitMode === "cover"
                     ? "Remplir"
-                    : "Entier"}
+                    : "Vue Entier"}
                 </span>
               </button>
+
+              {/* Bouton Agrandir en Vue Entière */}
+              {onExpandToFullView && (
+                <button
+                  type="button"
+                  onClick={() => onExpandToFullView(currentTime)}
+                  className="px-2 h-6 rounded-md bg-amber-400/20 hover:bg-amber-400/35 border border-amber-400/60 text-[10px] font-extrabold text-amber-300 inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors whitespace-nowrap"
+                  title="Agrandir en Vue Entière cinéma adaptée"
+                >
+                  <Maximize2 className="w-3 h-3 text-amber-300 shrink-0" />
+                  <span className="hidden sm:inline">Vue Entière</span>
+                </button>
+              )}
 
               {/* Bouton Plein écran natif */}
               <button

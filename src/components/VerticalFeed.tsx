@@ -193,10 +193,11 @@ export const VerticalFeed: React.FC<VerticalFeedProps> = ({
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   // Secondary action rail expansion (AI Summary, Watch Later, Audio, Cinema)
   const [moreActionsOpen, setMoreActionsOpen] = useState(false);
-  // Intelligent fit mode for all videos ("cover" = full-screen fill, "zoom" = zoom letterboxed TikTok/Reels, "contain" = full uncropped frame)
+  // Intelligent fit mode for all videos ("contain" = vue Entier par défaut stable)
   const [horizontalFitMode, setHorizontalFitMode] = useState<
     "cover" | "zoom" | "contain"
-  >("cover");
+  >("contain");
+  const userLockedFitModeRef = useRef<boolean>(false);
   // Native browser Fullscreen state
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   // Brief action feedback pill (auto-disappears)
@@ -304,9 +305,6 @@ export const VerticalFeed: React.FC<VerticalFeedProps> = ({
   const handleToggleNativeFullscreen = async () => {
     try {
       if (!document.fullscreenElement) {
-        if (horizontalFitMode === "contain") {
-          setHorizontalFitMode("cover");
-        }
         const el = document.documentElement as HTMLElement & {
           webkitRequestFullscreen?: () => Promise<void>;
         };
@@ -315,14 +313,13 @@ export const VerticalFeed: React.FC<VerticalFeedProps> = ({
         } else if (el.webkitRequestFullscreen) {
           await el.webkitRequestFullscreen();
         }
-        triggerEphemeralFeedback("Plein écran activé");
       } else if (document.exitFullscreen) {
         await document.exitFullscreen();
         triggerEphemeralFeedback("Plein écran quitté");
       }
     } catch {
-      setHorizontalFitMode((prev) => (prev === "cover" ? "zoom" : "cover"));
-      triggerEphemeralFeedback("Format plein cadre activé");
+      // In sandbox/iframe without fullscreen permission, fail gracefully without changing fit mode
+      triggerEphemeralFeedback("Plein écran non disponible dans cet environnement");
     }
   };
 
@@ -484,6 +481,7 @@ export const VerticalFeed: React.FC<VerticalFeedProps> = ({
         : 0;
     setActiveIndex(targetIdx);
     setInfiniteCycles(1);
+    setHorizontalFitMode("contain");
 
     const scrollToTarget = () => {
       const root = containerRef.current;
@@ -584,17 +582,16 @@ export const VerticalFeed: React.FC<VerticalFeedProps> = ({
     if (currentSlide?.video) {
       const isInitialTarget =
         initialVideoId != null && currentSlide.video.id === initialVideoId;
-      const savedProg = currentSlide.video.id
-        ? OrbitStorageService.getVideoProgress(currentSlide.video.id)
-        : 0;
-      const resumeSec = isInitialTarget
-        ? Math.max(initialStartSeconds || 0, savedProg)
-        : savedProg > 4
-        ? savedProg
-        : 0;
+      const resumeSec =
+        isInitialTarget && (initialStartSeconds || 0) > 0
+          ? initialStartSeconds || 0
+          : 0;
 
       setDraftRating(Number(currentSlide.video.score.toFixed(1)));
       setIsPaused(false);
+      userLockedFitModeRef.current = false;
+      setHorizontalFitMode("contain");
+
       setActiveDrawer(null);
       setDetailsExpanded(false);
       setMoreActionsOpen(false);
@@ -984,20 +981,14 @@ export const VerticalFeed: React.FC<VerticalFeedProps> = ({
 
             {/* 2. FULL-BLEED VIDEO STAGE (100% WIDTH & 100% HEIGHT ON MOBILE PORTRAIT & LANDSCAPE) */}
             <div className="relative z-10 w-full h-full flex items-center justify-center">
-              <div
-                className={`relative overflow-hidden bg-black transition-all duration-300 ${
-                  horizontalFitMode === "cover" || horizontalFitMode === "zoom"
-                    ? "w-full h-full"
-                    : isVerticalRatio
-                    ? "w-full h-full"
-                    : "w-full aspect-video max-h-full lg:w-[94%] lg:max-w-[1360px]"
-                }`}
-              >
+              <div className="relative overflow-hidden bg-black transition-all duration-300 w-full h-full flex items-center justify-center">
                 {isActive ? (
                   <div
                     className={`w-full h-full ${
                       useSmartCrop && !embedConfig.isFacebook
                         ? "orbit-video-smart-crop-16-9"
+                        : horizontalFitMode === "contain"
+                        ? "object-contain"
                         : "object-cover"
                     }`}
                   >
@@ -1079,7 +1070,11 @@ export const VerticalFeed: React.FC<VerticalFeedProps> = ({
                             );
                           }
                         }}
-                        className="w-full h-full object-cover"
+                        className={`w-full h-full ${
+                          horizontalFitMode === "contain"
+                            ? "object-contain"
+                            : "object-cover"
+                        }`}
                       />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center bg-neutral-950">
@@ -1236,30 +1231,31 @@ export const VerticalFeed: React.FC<VerticalFeedProps> = ({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
+                    userLockedFitModeRef.current = true;
                     const nextMode =
-                      horizontalFitMode === "cover"
+                      horizontalFitMode === "contain"
+                        ? "cover"
+                        : horizontalFitMode === "cover"
                         ? "zoom"
-                        : horizontalFitMode === "zoom"
-                        ? "contain"
-                        : "cover";
+                        : "contain";
                     setHorizontalFitMode(nextMode);
                     triggerEphemeralFeedback(
-                      nextMode === "zoom"
-                        ? "Zoom Plein Écran Max (sans bandes noires)"
+                      nextMode === "contain"
+                        ? "Vue Entier activée (format d'origine complet)"
                         : nextMode === "cover"
-                        ? "Plein cadre (Remplir l'écran)"
-                        : "Format entier d'origine"
+                        ? "Plein cadre (Gros cadrage)"
+                        : "Zoom Plein Écran Max (sans bandes noires)"
                     );
                   }}
                   className={`px-2.5 h-8 rounded-full orbit-compact-pill orbit-discreet-ui inline-flex items-center justify-center text-[10px] font-medium gap-1 cursor-pointer ${
                     isUiVisible ? "pointer-events-auto" : "pointer-events-none"
                   }`}
                   title={
-                    horizontalFitMode === "cover"
-                      ? "Activer le Zoom Max (idéal pour les vidéos TikTok avec bandes noires)"
-                      : horizontalFitMode === "zoom"
-                      ? "Voir le format entier d'origine sans recadrage"
-                      : "Remplir tout l'écran (Plein cadre)"
+                    horizontalFitMode === "contain"
+                      ? "Vue Entier active — Cliquer pour passer en Plein cadre"
+                      : horizontalFitMode === "cover"
+                      ? "Activer le Zoom Max (idéal pour les vidéos avec bandes noires)"
+                      : "Revenir à la vue Entier (format d'origine sans recadrage)"
                   }
                 >
                   {horizontalFitMode === "zoom" ? (
